@@ -7,7 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from tathya_avalokan.database.session import init_db
-from tathya_avalokan.routers import health_router, instances_router, projects_router, query_router
+from tathya_avalokan.routers import (
+    health_router,
+    instances_router,
+    projects_router,
+    query_router,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("tathya_avalokan")
@@ -45,7 +50,7 @@ app.add_middleware(
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     code_map = {
-        400: "VALIDATION_ERROR",
+        400: "QUERY_EXECUTION_ERROR",
         403: "READ_ONLY_VIOLATION",
         404: "NOT_FOUND",
         408: "QUERY_TIMEOUT",

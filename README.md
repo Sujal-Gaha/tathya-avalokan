@@ -15,7 +15,7 @@
 
 Modern developers work across multiple projects, microservices, and database instances. Switching between command-line tools or bulky desktop clients can fragment the workflow. **Tathya-Avalokan** brings the power and familiarity of a VS Code-like database workspace directly to the browser:
 
-1. **Project-to-Instance Hierarchy**: Organize databases by logical projects (e.g. *"E-commerce Platform"*, *"Analytics Engine"*) rather than an unorganized flat list of connection strings.
+1. **Project-to-Instance Hierarchy**: Organize databases by logical projects (e.g. _"E-commerce Platform"_, _"Analytics Engine"_) rather than an unorganized flat list of connection strings.
 2. **Backend-for-Frontend (BFF) Security**: Database credentials never leak to the client. The browser communicates exclusively with an authenticated FastAPI BFF proxy.
 3. **Encrypted Credentials at Rest**: Connection strings and credentials stored in the internal metadata database are encrypted using Fernet symmetric cryptography (`cryptography.fernet.Fernet`).
 4. **Lightweight Internal Metadata**: Application configurations and project/instance state are persisted in an embedded, zero-maintenance SQLite database (`sqlite+aiosqlite:///./app_metadata.db`).
@@ -95,10 +95,12 @@ tathya-avalokan/
 ## 🚀 Quick Start (Development)
 
 ### Prerequisites
+
 - Python 3.12+ (with `pip` or `uv`)
 - Node.js 18+ and `pnpm` (or `npm`)
 
 ### 1. Backend Setup
+
 ```bash
 cd backend
 python -m venv .venv
@@ -110,6 +112,7 @@ uvicorn tathya_avalokan.main:app --reload --port 8000
 ```
 
 ### 2. Frontend Setup
+
 ```bash
 cd frontend
 pnpm install
@@ -123,8 +126,8 @@ pnpm run dev
 ## 📅 Roadmap
 
 - [x] **Phase 1: Project Scaffolding & Architecture Documentation** (Foundational setup, specifications, and structure)
-- [ ] **Phase 2: Backend Metadata & Projects/Instances API** (CRUD operations, Fernet encryption, SQLite session persistence)
+- [x] **Phase 2: Backend Metadata & Projects/Instances API** (CRUD operations, Fernet encryption, SQLite session persistence)
 - [ ] **Phase 3: Database Proxy & Driver Engine** (Async connection testing and query execution for PostgreSQL and MySQL)
 - [ ] **Phase 4: Frontend Workspace & Monaco Editor** (Project sidebar, schema explorer, query execution workbench)
 - [ ] **Phase 5: Data Grid & Result Export** (Virtualized table viewer, pagination, CSV/JSON export)
-- [ ] **Phase 6: Schema Visualizer & Autocomplete** (Table columns, indexes, foreign keys, SQL schema-aware autocompletion)
+- [ ] **Phase 6: Schema Visualizer & Autocomplete** (Table columns, indexes, foreign key, SQL schema-aware autocompletion)
