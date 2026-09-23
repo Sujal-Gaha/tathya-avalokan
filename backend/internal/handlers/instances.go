@@ -6,11 +6,12 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
 	"tathya-avalokan/backend/internal/crypto"
 	"tathya-avalokan/backend/internal/models"
 	"tathya-avalokan/backend/internal/repository"
 	"tathya-avalokan/backend/internal/response"
+
+	"github.com/go-chi/chi/v5"
 )
 
 type InstancesHandler struct {

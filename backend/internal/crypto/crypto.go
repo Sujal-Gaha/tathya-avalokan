@@ -15,10 +15,10 @@ import (
 )
 
 var (
-	once        sync.Once
-	derivedKey  [32]byte
-	isFallback  bool
-	initErr     error
+	once       sync.Once
+	derivedKey [32]byte
+	isFallback bool
+	initErr    error
 )
 
 // InitCipherKey derives a 32-byte key from TATHYA_ENCRYPTION_KEY or the fallback APP_SECRET_KEY.
@@ -134,4 +134,3 @@ func HasConfiguredCredentials(encryptedText string) bool {
 	}
 	return (creds["password"] != "" || creds["connection_url"] != "")
 }
-

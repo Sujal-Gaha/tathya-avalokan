@@ -23,11 +23,11 @@ type ProjectUpdate struct {
 }
 
 type ProjectResponse struct {
-	ID             string                    `json:"id"`
-	Name           string                    `json:"name"`
-	Description    *string                   `json:"description"`
-	InstancesCount int                       `json:"instances_count"`
+	ID             string                      `json:"id"`
+	Name           string                      `json:"name"`
+	Description    *string                     `json:"description"`
+	InstancesCount int                         `json:"instances_count"`
 	Instances      *[]DatabaseInstanceResponse `json:"instances,omitempty"`
-	CreatedAt      time.Time                 `json:"created_at"`
-	UpdatedAt      time.Time                 `json:"updated_at"`
+	CreatedAt      time.Time                   `json:"created_at"`
+	UpdatedAt      time.Time                   `json:"updated_at"`
 }

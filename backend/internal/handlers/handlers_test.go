@@ -9,9 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	"tathya-avalokan/backend/internal/database"
 	"tathya-avalokan/backend/internal/repository"
+
+	"github.com/go-chi/chi/v5"
 )
 
 func setupTestServer(t *testing.T) *httptest.Server {

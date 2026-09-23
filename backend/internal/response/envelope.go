@@ -7,12 +7,12 @@ import (
 
 // Standard Error Codes
 const (
-	ErrCodeValidation      = "VALIDATION_ERROR"
-	ErrCodeNotFound        = "NOT_FOUND"
-	ErrCodeReadOnly        = "READ_ONLY_VIOLATION"
-	ErrCodeQueryExecution  = "QUERY_EXECUTION_ERROR"
-	ErrCodeQueryTimeout    = "QUERY_TIMEOUT"
-	ErrCodeInternal        = "INTERNAL_ERROR"
+	ErrCodeValidation       = "VALIDATION_ERROR"
+	ErrCodeNotFound         = "NOT_FOUND"
+	ErrCodeReadOnly         = "READ_ONLY_VIOLATION"
+	ErrCodeQueryExecution   = "QUERY_EXECUTION_ERROR"
+	ErrCodeQueryTimeout     = "QUERY_TIMEOUT"
+	ErrCodeInternal         = "INTERNAL_ERROR"
 	ErrCodeConnectionFailed = "CONNECTION_FAILED"
 )
 

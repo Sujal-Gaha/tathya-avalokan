@@ -5,9 +5,10 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/google/uuid"
 	"tathya-avalokan/backend/internal/crypto"
 	"tathya-avalokan/backend/internal/models"
+
+	"github.com/google/uuid"
 )
 
 type InstanceRepository struct {

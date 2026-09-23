@@ -7,11 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"tathya-avalokan/backend/internal/guard"
 	"tathya-avalokan/backend/internal/models"
 	"tathya-avalokan/backend/internal/repository"
 	"tathya-avalokan/backend/internal/response"
+
+	"github.com/go-chi/chi/v5"
 )
 
 type QueryHandler struct {

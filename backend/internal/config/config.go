@@ -68,8 +68,8 @@ func cleanSQLiteDSN(dsn string) string {
 		"sqlite://",
 	}
 	for _, prefix := range prefixes {
-		if strings.HasPrefix(dsn, prefix) {
-			return strings.TrimPrefix(dsn, prefix)
+		if after, ok := strings.CutPrefix(dsn, prefix); ok {
+			return after
 		}
 	}
 	return dsn
