@@ -1,15 +1,38 @@
-# Tathya-Avalokan Backend
+# Tathya-Avalokan Backend (Go)
 
-FastAPI Backend-for-Frontend (BFF) and Database Proxy service.
+Go + Chi Backend-for-Frontend (BFF) and Database Proxy service.
 
-## Structure
-- `src/tathya_avalokan/database`: Async SQLite session and engine
-- `src/tathya_avalokan/models`: SQLAlchemy ORM models
-- `src/tathya_avalokan/schemas`: Pydantic v2 schemas and response envelopes
-- `src/tathya_avalokan/routers`: API endpoints
-- `src/tathya_avalokan/utils`: Fernet symmetric encryption utilities
+## Architecture & Layout
+- `cmd/server/main.go`: Application entrypoint, Chi router mounting, graceful shutdown
+- `internal/config`: Environment variable loading and defaults
+- `internal/database`: Pure Go SQLite engine (`modernc.org/sqlite`) with embedded schema migration
+- `internal/crypto`: AES-256-GCM authenticated credential encryption, key derivation, and URI masking
+- `internal/guard`: Comment-stripping SQL keyword extractor and read-only guardrails
+- `internal/models`: Domain structs, requests, and unified response DTOs
+- `internal/repository`: Clean SQLite data access layer for projects and database instances
+- `internal/handlers`: HTTP REST controllers implementing `/api/v1`
+- `internal/middleware`: CORS and request handling
 
-## Running the Server
+## Getting Started
+
+### Prerequisites
+- Go 1.22+ (Zero CGO required, `CGO_ENABLED=0`)
+
+### Running Locally
 ```bash
-uvicorn tathya_avalokan.main:app --reload --port 8000
+# Copy sample environment configuration
+cp .env.example .env
+
+# Run development server
+go run ./cmd/server
+```
+
+### Running Tests
+```bash
+go test -v -race ./...
+```
+
+### Building Binary
+```bash
+CGO_ENABLED=0 go build -o tathya-server ./cmd/server
 ```

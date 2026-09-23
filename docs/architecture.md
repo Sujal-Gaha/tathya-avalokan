@@ -6,8 +6,9 @@
 
 Traditional database administration interfaces often suffer from complex installation footprints, rigid desktop bindings, or bloated web interfaces. Tathya-Avalokan addresses this with:
 - A hierarchical **Project-to-Instance** organization model.
-- A secure **Backend-for-Frontend (BFF)** database proxy layer.
-- Embedded, zero-maintenance internal metadata persistence via **SQLite (`aiosqlite`)**.
+- A secure **Backend-for-Frontend (BFF)** database proxy layer written in **Go (Chi)**.
+- Embedded, zero-maintenance internal metadata persistence via **Pure Go SQLite (`modernc.org/sqlite`)**, requiring zero CGO.
+- Authenticated **AES-256-GCM** credential encryption at rest.
 - A high-performance, modular React 18 + TypeScript single-page application.
 
 ---
@@ -17,22 +18,22 @@ Traditional database administration interfaces often suffer from complex install
 ### The Need for a BFF Proxy
 Web browsers cannot natively establish raw TCP socket connections to database servers (such as PostgreSQL on port `5432` or MySQL on port `3306`) due to standard web security boundaries and protocol constraints. Furthermore, exposing raw database connection credentials (usernames, passwords, hostnames) to the client presents critical security liabilities.
 
-Tathya-Avalokan solves this by establishing a dedicated **FastAPI BFF Proxy**:
+Tathya-Avalokan solves this by establishing a dedicated **Go (Chi) BFF Proxy**:
 
 ```text
 ┌────────────────┐           HTTP REST (/api/v1)           ┌──────────────────┐
 │                │ ──────────────────────────────────────> │                  │
 │                │   POST /instances/{id}/query            │                  │
 │                │   { "sql": "SELECT * FROM users;" }     │                  │
-│    Browser     │                                         │   FastAPI BFF    │
-│ Frontend (SPA) │ <────────────────────────────────────── │     Proxy        │
+│    Browser     │                                         │   Go (Chi) BFF   │
+│ Frontend (SPA) │ <────────────────────────────────────── │      Proxy       │
 │                │   Unified Response Envelope             │                  │
 │                │   { "data": { "rows": [...] } }         │                  │
 └────────────────┘                                         └────────┬─────────┘
                                                                     │
-                                            Native Async Drivers    │ (Connection Pool,
-                                            (asyncpg / aiomysql)    │  Fernet Credential
-                                                                    │  Decryption, Timeouts)
+                                            Native Go Drivers       │ (Connection Pool,
+                                            (pgxpool / go-sql-mysql)│  AES-256-GCM Decryption,
+                                                                    │  Context Timeouts)
                                                                     ▼
                                                            ┌──────────────────┐
                                                            │  Target Database │
@@ -42,10 +43,10 @@ Tathya-Avalokan solves this by establishing a dedicated **FastAPI BFF Proxy**:
 
 ### Proxy & Query Execution Lifecycle
 1. **Request Intake**: The frontend transmits a structured query request (`sql`, optional pagination `limit`/`offset`, and `timeout_seconds`) to `POST /api/v1/instances/{id}/query`.
-2. **Metadata Lookup & Decryption**: The BFF retrieves the target `DatabaseInstance` record from the internal SQLite database (`app_metadata.db`). The encrypted credentials are decrypted in memory using `cryptography.fernet.Fernet`.
-3. **Connection Handshake**: The proxy initializes or reuses an asynchronous database client connection (`asyncpg` for PostgreSQL, `aiomysql` for MySQL, or `aiosqlite` for SQLite).
-4. **Execution & Timeout Guardrails**: The query runs within an `asyncio.wait_for(...)` execution wrapper. If the target query exceeds the configured timeout threshold (default: 30 seconds), the proxy aborts the database call, cleans up connections, and issues an HTTP 408 / `QUERY_TIMEOUT` error.
-5. **Streaming & Serialization**: Result set metadata (column names, inferred data types) and row tuples are converted into JSON-serializable dictionaries and encapsulated within the unified response envelope.
+2. **Metadata Lookup & Decryption**: The BFF retrieves the target `DatabaseInstance` record from the internal SQLite database (`app_metadata.db`). The encrypted credentials are decrypted in memory using AES-256-GCM authenticated cipher.
+3. **Connection Handshake**: The proxy initializes or reuses a database client connection pool (`database/sql` or `pgxpool`).
+4. **Execution & Timeout Guardrails**: The query runs within a `context.WithTimeout(...)` execution wrapper. If the target query exceeds the configured timeout threshold (default: 30 seconds), the proxy aborts the database call, cleans up connections, and issues an HTTP 408 / `QUERY_TIMEOUT` error.
+5. **Streaming & Serialization**: Result set metadata (column names, inferred data types) and row tuples are converted into JSON-serializable structures and encapsulated within the unified response envelope.
 
 ---
 
@@ -82,7 +83,7 @@ To ensure seamless performance, zero unnecessary re-renders, and complete separa
 
 ## 4. Internal Metadata SQLite Schema
 
-The application persists internal state (projects, configurations, encrypted credentials) in an embedded SQLite database using SQLAlchemy 2.0 (async) and `aiosqlite`.
+The application persists internal state (projects, configurations, encrypted credentials) in an embedded pure Go SQLite database using standard library `database/sql` and `modernc.org/sqlite` (requiring zero CGO).
 
 ### Entity-Relationship Diagram
 
@@ -108,7 +109,7 @@ The application persists internal state (projects, configurations, encrypted cre
 │ port (INTEGER, Nullable)  │
 │ database_name (VARCHAR)   │
 │ username (VARCHAR, Nullable)
-│ encrypted_credentials (TEXT) (Fernet ciphertext)
+│ encrypted_credentials (TEXT) (AES-256-GCM ciphertext)
 │ ssl_mode (VARCHAR)        │  (disable, require, verify-ca, verify-full)
 │ is_read_only (BOOLEAN)    │
 │ created_at (DATETIME)     │
@@ -138,7 +139,7 @@ The application persists internal state (projects, configurations, encrypted cre
 | `port` | `INTEGER` | NULLABLE | Port number (e.g. 5432, 3306) |
 | `database_name` | `VARCHAR(100)` | NOT NULL | Target database or catalog name |
 | `username` | `VARCHAR(100)` | NULLABLE | Authentication username |
-| `encrypted_credentials` | `TEXT` | NOT NULL | Fernet-encrypted JSON (password, token, connection options) |
+| `encrypted_credentials` | `TEXT` | NOT NULL | AES-256-GCM-encrypted JSON (password, token, connection options) |
 | `ssl_mode` | `VARCHAR(30)` | NOT NULL, DEFAULT 'prefer' | Target TLS / SSL verification policy |
 | `is_read_only` | `BOOLEAN` | NOT NULL, DEFAULT FALSE | Enforces read-only query guardrails |
 | `created_at` | `DATETIME` | NOT NULL, DEFAULT UTC | Creation timestamp |
@@ -148,20 +149,12 @@ The application persists internal state (projects, configurations, encrypted cre
 
 ## 5. Security Model & Credential Protection
 
-### Symmetric Encryption at Rest (Fernet)
+### Symmetric Encryption at Rest (AES-256-GCM)
 Database passwords, authentication tokens, and sensitive connection strings MUST NEVER be stored in plain text.
-- Tathya-Avalokan uses Python's standard `cryptography.fernet.Fernet` (AES-128 in CBC mode with PKCS7 padding and HMAC-SHA256 authentication).
-- Encryption keys are retrieved from the `TATHYA_ENCRYPTION_KEY` environment variable.
-- During development, if no key is provided, a deterministic development key is derived or generated with an explicit warning in application logs.
-
-```python
-# Conceptual Flow
-cipher = Fernet(ENCRYPTION_KEY)
-# Storage
-encrypted_blob = cipher.encrypt(json.dumps({"password": raw_password}).encode()).decode()
-# Retrieval in Proxy
-decrypted_data = json.loads(cipher.decrypt(encrypted_blob.encode()).decode())
-```
+- Tathya-Avalokan uses Go's standard library `crypto/cipher` and `crypto/aes` for authenticated AES-256-GCM encryption.
+- 96-bit random nonces are generated per encryption operation via `crypto/rand` and prepended to the ciphertext.
+- Master 256-bit keys are derived using `crypto/sha256` from the `TATHYA_ENCRYPTION_KEY` environment variable.
+- During development, if no key is provided, a deterministic fallback key is used alongside an explicit warning in application logs.
 
 ### Credential Masking in API Responses
 - Passwords and raw encrypted blobs are **strictly excluded** from API responses.
@@ -169,9 +162,9 @@ decrypted_data = json.loads(cipher.decrypt(encrypted_blob.encode()).decode())
 - Any generated connection string displays are masked (e.g., `postgresql://dbuser:********@prod-db.internal:5432/orders`).
 
 ### Execution Guardrails
-- **Statement Timeouts**: Every proxy query has a hard timeout limit enforced by `asyncio.wait_for` (configurable, default 30s).
-- **Read-Only Mode Enforcement**: Instances configured as `is_read_only=True` reject mutating statements (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`).
-- **CORS Protection**: Restricted to trusted frontend origins.
+- **Statement Timeouts**: Every proxy query has a hard timeout limit enforced by `context.WithTimeout` (configurable, default 30s).
+- **Read-Only Mode Enforcement**: Instances configured as `is_read_only=true` reject mutating statements (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`, `CREATE`, `REPLACE`). Comment bypass attempts (`--` and `/* */`) are stripped prior to keyword extraction.
+- **CORS Protection**: Restricted to trusted frontend origins via `go-chi/cors`.
 
 ---
 
@@ -203,37 +196,23 @@ Tathya-Avalokan is currently designed as a **single-user, local-first developmen
 
 > ⚠️ **Important**: The CORS policy defaults to `allow_origins=["*"]` in development. This is intentional for localhost developer use, but **must** be tightened before any deployment reachable over a network. Configure `CORS_ORIGINS` in `.env` with explicit trusted origins.
 
-### Recommended Hardening for Shared / Network Deployment
-
-If the application is deployed in a shared or team context, the following authentication path is recommended:
-
-| Concern | Recommended Approach |
-|---|---|
-| API Authentication | Bearer token middleware (e.g. `python-jose` JWT or `authlib`) |
-| Identity Provider | Any OIDC-compatible IdP (Keycloak, Auth0, Google) |
-| Per-User Data Isolation | Add `user_id` FK to the `projects` table |
-| Frontend Token Storage | `sessionStorage` only (never `localStorage` for sensitive tokens) |
-| CORS | Restrict `allow_origins` to the exact frontend hostname |
-
-This authentication layer is deferred to a post-Phase 6 hardening milestone and is **explicitly out of scope** for local developer use cases.
-
 ---
 
 ## 8. Connection Pool Strategy (Phase 3 Design)
 
-When Phase 3 introduces live database driver execution (`asyncpg`, `aiomysql`), the proxy layer will manage async connection pools per `DatabaseInstance`. The following design is planned:
+When Phase 3 introduces live database driver execution, the proxy layer will manage connection pools per `DatabaseInstance`:
 
 ### Per-Instance Pool Design
 
 ```text
-FastAPI Request
+Chi HTTP Request
     │
     ▼
-ConnectionPoolRegistry (in-memory dict, instance_id → Pool)
+ConnectionPoolRegistry (sync.Map, instance_id → *sql.DB / *pgxpool.Pool)
     │
-    ├── asyncpg.Pool (PostgreSQL)  — min_size=1, max_size=10
-    ├── aiomysql.Pool (MySQL)      — minsize=1, maxsize=10
-    └── aiosqlite conn (SQLite)    — single connection, serialized
+    ├── pgxpool.Pool (PostgreSQL)  — min_conns=1, max_conns=10
+    ├── database/sql (MySQL)       — SetMaxOpenConns(10), SetMaxIdleConns(1)
+    └── database/sql (SQLite)      — single connection, serialized
 ```
 
 ### Pool Lifecycle
@@ -243,65 +222,25 @@ ConnectionPoolRegistry (in-memory dict, instance_id → Pool)
 | First query on an instance | Pool created and cached in registry |
 | Subsequent queries | Existing pool connection acquired |
 | Instance deleted | Pool evicted from registry, connections drained |
-| Server shutdown | All pools gracefully closed in lifespan teardown |
-| Query timeout | Connection returned/closed; not poisoned in pool |
-
-### Configuration Parameters (Phase 3)
-
-```python
-# Planned environment variable controls per driver
-PROXY_POOL_MAX_SIZE = 10      # Maximum concurrent connections per instance
-PROXY_POOL_MIN_SIZE = 1       # Minimum idle connections maintained
-PROXY_POOL_MAX_IDLE_SEC = 300 # Evict connections idle longer than this
-PROXY_QUERY_TIMEOUT_SEC = 30  # Default asyncio.wait_for timeout
-```
+| Server shutdown | All pools gracefully closed |
+| Query timeout | Context cancellation aborts statement cleanly |
 
 ---
 
 ## 9. Result Pagination Design
 
 The `QueryRequest` and `QueryResponse` schemas are **already fully defined** to support pagination:
-
 - `QueryRequest.limit` — Maximum rows to return in a single batch (default: 100, max: 5000)
 - `QueryRequest.offset` — Row offset for keyset/offset pagination
 - `QueryResponse.has_more` — Whether rows beyond `limit` exist
-
-### Implementation Status
-
-| Component | Status |
-|---|---|
-| Pydantic schemas | ✅ Defined |
-| API contract | ✅ Documented in `api_spec.md` |
-| Backend executor wiring | ⏳ Phase 3 — will apply `LIMIT`/`OFFSET` in the proxy SQL wrapper |
-| Frontend UI controls | ⏳ Phase 5 — TanStack Table pagination will pass `offset` as the user pages |
-
-The pagination contract is fixed and will not change shape; only the executor wiring is deferred.
 
 ---
 
 ## 10. `instances_count` — Live Aggregate vs. Stored Counter
 
-The `instances_count` field returned by `GET /api/v1/projects` and `PATCH /api/v1/projects/{id}` is a **live aggregate**, not a stored denormalized counter.
-
-### How it works
-
-The `Project` ORM model uses `lazy="selectin"` on the `instances` relationship:
-
-```python
-instances: Mapped[list["DatabaseInstance"]] = relationship(
-    "DatabaseInstance",
-    back_populates="project",
-    cascade="all, delete-orphan",
-    lazy="selectin",  # SQLAlchemy fires a SELECT IN query alongside the parent
-)
-```
-
-The router then computes: `instances_count = len(project.instances)`.
+The `instances_count` field returned by `GET /api/v1/projects` is a **live aggregate** computed via `LEFT JOIN` and `COUNT(d.id)` grouped by `p.id`.
 
 ### Guarantees
-
 - **Always accurate** — derived from live FK rows, no separate counter to drift
-- **Cascade safe** — deleting a project cascades at the DB level; the count naturally hits 0
-- **No race condition** — single SQLite database with serialized writes eliminates counter inconsistency
-
-This design is appropriate for the current SQLite persistence layer. For a high-throughput PostgreSQL metadata store, a denormalized counter with triggers or a `SELECT COUNT(*)` subquery may perform better.
+- **Cascade safe** — deleting a project cascades at the DB level; count naturally zeroes
+- **Zero synchronization latency** — always strictly consistent

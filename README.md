@@ -3,9 +3,9 @@
 > **A modern, full-stack, browser-based database client and workspace.**
 > Manage projects, connect to diverse database engines, inspect schemas, and execute queries in a sleek, developer-first interface.
 
-[![Python](https://img.shields.io/badge/python-3.12%2B-blue)](backend/)
+[![Go](https://img.shields.io/badge/go-1.22%2B-00ADD8)](backend/)
+[![Chi Router](https://img.shields.io/badge/router-Chi%20v5-00ADD8)](backend/)
 [![TypeScript](https://img.shields.io/badge/typescript-5.4%2B-blue)](frontend/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688)](backend/)
 [![React](https://img.shields.io/badge/React-18.3%2B-61DAFB)](frontend/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
@@ -16,9 +16,9 @@
 Modern developers work across multiple projects, microservices, and database instances. Switching between command-line tools or bulky desktop clients can fragment the workflow. **Tathya-Avalokan** brings the power and familiarity of a VS Code-like database workspace directly to the browser:
 
 1. **Project-to-Instance Hierarchy**: Organize databases by logical projects (e.g. _"E-commerce Platform"_, _"Analytics Engine"_) rather than an unorganized flat list of connection strings.
-2. **Backend-for-Frontend (BFF) Security**: Database credentials never leak to the client. The browser communicates exclusively with an authenticated FastAPI BFF proxy.
-3. **Encrypted Credentials at Rest**: Connection strings and credentials stored in the internal metadata database are encrypted using Fernet symmetric cryptography (`cryptography.fernet.Fernet`).
-4. **Lightweight Internal Metadata**: Application configurations and project/instance state are persisted in an embedded, zero-maintenance SQLite database (`sqlite+aiosqlite:///./app_metadata.db`).
+2. **Backend-for-Frontend (BFF) Security**: Database credentials never leak to the client. The browser communicates exclusively with an authenticated Go (Chi) BFF proxy.
+3. **Encrypted Credentials at Rest**: Connection strings and credentials stored in the internal metadata database are encrypted using authenticated **AES-256-GCM** symmetric cryptography.
+4. **Lightweight Internal Metadata**: Application configurations and project/instance state are persisted in an embedded, zero-maintenance pure Go SQLite database (`modernc.org/sqlite`, zero CGO).
 5. **Modern Developer UX**: Monaco code editor with SQL syntax highlighting, virtualized TanStack data grids, schema inspection trees, and low-latency proxy query execution with timeout guardrails.
 
 ---
@@ -38,14 +38,15 @@ Tathya-Avalokan adopts a clean **Backend-for-Frontend (BFF)** database proxy arc
                                │ HTTP REST (/api/v1)
                                │ JSON Unified Envelope
 ┌──────────────────────────────▼──────────────────────────────┐
-│                    FastAPI BFF Proxy                        │
+│                    Go (Chi) BFF Proxy                       │
 │  • Project & Instance Metadata CRUD                         │
-│  • Credential Encryption / Decryption (Fernet)              │
+│  • Credential Encryption / Decryption (AES-256-GCM)         │
 │  • Target Database Connector & Proxy Worker                 │
 │  • Query Timeout & Guardrails Enforcement                   │
 └──────────────┬───────────────────────────────┬──────────────┘
                │                               │
-    SQLAlchemy │ Async (aiosqlite)             │ asyncpg / aiomysql / sqlite
+    database/  │ modernc.org/sqlite            │ Driver Proxy (Phase 3)
+           sql │ (CGO-free Pure Go)            │ pgx / go-sql-driver/mysql / sqlite
                ▼                               ▼
 ┌──────────────────────────────┐ ┌────────────────────────────┐
 │   App Metadata (SQLite)      │ │   Target User Databases    │
@@ -67,17 +68,23 @@ tathya-avalokan/
 ├── docs/                           # Architecture specs, API guidelines, security models
 │   ├── architecture.md
 │   └── api_spec.md
-├── backend/                        # FastAPI BFF & database proxy server
-│   ├── pyproject.toml              # Python packaging & dependencies
-│   ├── requirements.txt            # Fallback pip requirements
-│   ├── alembic.ini                 # Metadata migration configuration
-│   └── src/tathya_avalokan/
-│       ├── main.py                 # Application factory & CORS
-│       ├── database/               # Async SQLAlchemy engine & sessionmaker
-│       ├── models/                 # Metadata ORM entities (Project, DatabaseInstance)
-│       ├── schemas/                # Pydantic v2 validation models & response envelopes
-│       ├── routers/                # API endpoints (health, projects, instances, query)
-│       └── utils/                  # Cryptography & Fernet credential encryption
+├── backend/                        # Go (Chi) BFF & database proxy server
+│   ├── go.mod                      # Go module dependencies
+│   ├── go.sum                      # Go checksums
+│   ├── .env.example                # Sample environment configuration
+│   ├── cmd/
+│   │   └── server/
+│   │       └── main.go             # Application entrypoint & HTTP server
+│   └── internal/
+│       ├── config/                 # Environment configuration
+│       ├── database/               # SQLite connection & embedded schema
+│       ├── models/                 # Domain structs & DTOs
+│       ├── crypto/                 # AES-256-GCM encryption & URI masking
+│       ├── response/               # Standardized JSON response envelope
+│       ├── repository/             # SQLite data access layer
+│       ├── guard/                  # SQL keyword extractor & read-only guard
+│       ├── handlers/               # HTTP REST handlers (/api/v1)
+│       └── middleware/             # CORS and request middleware
 └── frontend/                       # React + TypeScript single-page application
     ├── package.json                # Dependencies (Monaco, TanStack Table/Query, Zustand)
     ├── vite.config.ts              # Vite configuration & dev proxy
@@ -96,19 +103,17 @@ tathya-avalokan/
 
 ### Prerequisites
 
-- Python 3.12+ (with `pip` or `uv`)
+- Go 1.22+ (CGO-free, `CGO_ENABLED=0`)
 - Node.js 18+ and `pnpm` (or `npm`)
 
 ### 1. Backend Setup
 
 ```bash
 cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+cp .env.example .env
 
-# Run the API server with auto-reload (default: http://localhost:8000)
-uvicorn tathya_avalokan.main:app --reload --port 8000
+# Run the API server (default: http://localhost:8000)
+go run ./cmd/server
 ```
 
 ### 2. Frontend Setup
@@ -126,8 +131,8 @@ pnpm run dev
 ## 📅 Roadmap
 
 - [x] **Phase 1: Project Scaffolding & Architecture Documentation** (Foundational setup, specifications, and structure)
-- [x] **Phase 2: Backend Metadata & Projects/Instances API** (CRUD operations, Fernet encryption, SQLite session persistence)
-- [ ] **Phase 3: Database Proxy & Driver Engine** (Async connection testing and query execution for PostgreSQL and MySQL)
+- [x] **Phase 2: Backend Metadata & Projects/Instances API in Go** (Chi router, AES-256-GCM encryption, modernc SQLite persistence)
+- [ ] **Phase 3: Database Proxy & Driver Engine** (Connection testing and query execution for PostgreSQL and MySQL)
 - [ ] **Phase 4: Frontend Workspace & Monaco Editor** (Project sidebar, schema explorer, query execution workbench)
 - [ ] **Phase 5: Data Grid & Result Export** (Virtualized table viewer, pagination, CSV/JSON export)
 - [ ] **Phase 6: Schema Visualizer & Autocomplete** (Table columns, indexes, foreign key, SQL schema-aware autocompletion)

@@ -69,3 +69,9 @@ coverage/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# Go
+/backend/tathya-server
+/backend/server
+*.exe
+*.test
