@@ -3,9 +3,11 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 
 	"tathya-avalokan/backend/internal/models"
+	"tathya-avalokan/backend/internal/proxy"
 	"tathya-avalokan/backend/internal/repository"
 	"tathya-avalokan/backend/internal/response"
 
@@ -13,11 +15,15 @@ import (
 )
 
 type ProjectsHandler struct {
-	repo *repository.ProjectRepository
+	repo        *repository.ProjectRepository
+	proxyEngine *proxy.ProxyEngine
 }
 
-func NewProjectsHandler(repo *repository.ProjectRepository) *ProjectsHandler {
-	return &ProjectsHandler{repo: repo}
+func NewProjectsHandler(repo *repository.ProjectRepository, proxyEngine *proxy.ProxyEngine) *ProjectsHandler {
+	return &ProjectsHandler{
+		repo:        repo,
+		proxyEngine: proxyEngine,
+	}
 }
 
 // CreateProject handles POST /api/v1/projects
@@ -117,6 +123,15 @@ func (h *ProjectsHandler) DeleteProject(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	var childIDs []string
+	if h.proxyEngine != nil {
+		var err error
+		childIDs, err = h.repo.GetInstanceIDsByProjectID(r.Context(), id)
+		if err != nil {
+			log.Printf("[WARN] Failed to fetch child instance IDs for eviction: %v", err)
+		}
+	}
+
 	deleted, err := h.repo.DeleteProject(r.Context(), id)
 	if err != nil {
 		response.SendError(w, http.StatusInternalServerError, response.ErrCodeInternal, err.Error(), nil)
@@ -126,6 +141,10 @@ func (h *ProjectsHandler) DeleteProject(w http.ResponseWriter, r *http.Request) 
 	if !deleted {
 		response.SendError(w, http.StatusNotFound, response.ErrCodeNotFound, fmt.Sprintf("Project with id '%s' was not found", id), nil)
 		return
+	}
+
+	if h.proxyEngine != nil && len(childIDs) > 0 {
+		h.proxyEngine.EvictMultiple(childIDs)
 	}
 
 	response.SendJSON(w, http.StatusOK, map[string]any{

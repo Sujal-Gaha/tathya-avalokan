@@ -179,6 +179,32 @@ func (r *ProjectRepository) UpdateProject(ctx context.Context, id string, req mo
 	return current, nil
 }
 
+// GetInstanceIDsByProjectID retrieves all child database instance IDs belonging to a project.
+// Used prior to cascading project deletion to cleanly evict open connection pools.
+func (r *ProjectRepository) GetInstanceIDsByProjectID(ctx context.Context, projectID string) ([]string, error) {
+	query := `SELECT id FROM database_instances WHERE project_id = ?`
+	rows, err := r.db.QueryContext(ctx, query, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return ids, nil
+}
+
 // DeleteProject deletes a project by ID (cascades database_instances).
 func (r *ProjectRepository) DeleteProject(ctx context.Context, id string) (bool, error) {
 	query := `DELETE FROM projects WHERE id = ?`

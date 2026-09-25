@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"tathya-avalokan/backend/internal/database"
+	"tathya-avalokan/backend/internal/proxy"
 	"tathya-avalokan/backend/internal/repository"
 
 	"github.com/go-chi/chi/v5"
@@ -23,11 +24,12 @@ func setupTestServer(t *testing.T) *httptest.Server {
 
 	pRepo := repository.NewProjectRepository(db)
 	iRepo := repository.NewInstanceRepository(db)
+	proxyEngine := proxy.NewProxyEngine()
 
 	healthH := NewHealthHandler()
-	projH := NewProjectsHandler(pRepo)
-	instH := NewInstancesHandler(pRepo, iRepo)
-	queryH := NewQueryHandler(iRepo)
+	projH := NewProjectsHandler(pRepo, proxyEngine)
+	instH := NewInstancesHandler(pRepo, iRepo, proxyEngine)
+	queryH := NewQueryHandler(iRepo, proxyEngine)
 
 	r := chi.NewRouter()
 	r.Route("/api/v1", func(r chi.Router) {
@@ -270,7 +272,7 @@ func TestReadOnlyGuardEnforcement(t *testing.T) {
 	_, iPayload, _ := doReq(t, http.MethodPost, ts.URL+"/api/v1/projects/"+projectID+"/instances", map[string]any{
 		"name":          "RO DB",
 		"driver_type":   "sqlite",
-		"database_name": "ro.db",
+		"database_name": ":memory:",
 		"is_read_only":  true,
 	})
 	instanceID := iPayload["data"].(map[string]any)["id"].(string)
@@ -384,8 +386,8 @@ func TestTestConnection(t *testing.T) {
 
 	_, iPayload, _ := doReq(t, http.MethodPost, ts.URL+"/api/v1/projects/"+projectID+"/instances", map[string]any{
 		"name":          "Conn DB",
-		"driver_type":   "postgresql",
-		"database_name": "conndb",
+		"driver_type":   "sqlite",
+		"database_name": ":memory:",
 	})
 	instanceID := iPayload["data"].(map[string]any)["id"].(string)
 
@@ -396,5 +398,145 @@ func TestTestConnection(t *testing.T) {
 	data := payload["data"].(map[string]any)
 	if data["connected"] != true {
 		t.Errorf("Expected connected: true, got %v", data["connected"])
+	}
+}
+
+func TestTestConnection_Failure(t *testing.T) {
+	ts := setupTestServer(t)
+	defer ts.Close()
+
+	_, pPayload, _ := doReq(t, http.MethodPost, ts.URL+"/api/v1/projects", map[string]any{
+		"name": "Fail Conn Project",
+	})
+	projectID := pPayload["data"].(map[string]any)["id"].(string)
+
+	badPort := 59999
+	_, iPayload, _ := doReq(t, http.MethodPost, ts.URL+"/api/v1/projects/"+projectID+"/instances", map[string]any{
+		"name":          "Unreachable DB",
+		"driver_type":   "postgresql",
+		"host":          "127.0.0.1",
+		"port":          badPort,
+		"database_name": "none",
+		"ssl_mode":      "disable",
+	})
+	instanceID := iPayload["data"].(map[string]any)["id"].(string)
+
+	resp, payload, _ := doReq(t, http.MethodPost, ts.URL+"/api/v1/instances/"+instanceID+"/test-connection", nil)
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("Expected 502 Bad Gateway for unreachable host, got %d", resp.StatusCode)
+	}
+	errObj := payload["error"].(map[string]any)
+	if errObj["code"] != "CONNECTION_FAILED" {
+		t.Errorf("Expected CONNECTION_FAILED, got %v", errObj["code"])
+	}
+}
+
+func TestExecuteQuery_EndToEnd(t *testing.T) {
+	ts := setupTestServer(t)
+	defer ts.Close()
+
+	// 1. Create project & SQLite instance with shared in-memory DB
+	_, pPayload, _ := doReq(t, http.MethodPost, ts.URL+"/api/v1/projects", map[string]any{
+		"name": "Query Exec Project",
+	})
+	projectID := pPayload["data"].(map[string]any)["id"].(string)
+
+	_, iPayload, _ := doReq(t, http.MethodPost, ts.URL+"/api/v1/projects/"+projectID+"/instances", map[string]any{
+		"name":          "Query Exec DB",
+		"driver_type":   "sqlite",
+		"database_name": "file:test_e2e_query?mode=memory&cache=shared",
+	})
+	instanceID := iPayload["data"].(map[string]any)["id"].(string)
+
+	// 2. Execute DDL: CREATE TABLE
+	resp, payload, _ := doReq(t, http.MethodPost, ts.URL+"/api/v1/instances/"+instanceID+"/query", map[string]any{
+		"sql": "CREATE TABLE products (id INT, name TEXT, price REAL);",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200 OK for CREATE TABLE, got %d: %v", resp.StatusCode, payload)
+	}
+
+	// 3. Execute DML: INSERT
+	resp, payload, _ = doReq(t, http.MethodPost, ts.URL+"/api/v1/instances/"+instanceID+"/query", map[string]any{
+		"sql": "INSERT INTO products VALUES (1, 'Book', 19.99), (2, 'Pen', 2.50), (3, 'Notebook', 7.00);",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200 OK for INSERT, got %d: %v", resp.StatusCode, payload)
+	}
+	data := payload["data"].(map[string]any)
+	if data["rows_affected"].(float64) != 3 {
+		t.Errorf("Expected 3 rows affected, got %v", data["rows_affected"])
+	}
+
+	// 4. Execute SELECT with pagination
+	resp, payload, _ = doReq(t, http.MethodPost, ts.URL+"/api/v1/instances/"+instanceID+"/query", map[string]any{
+		"sql":    "SELECT id, name, price FROM products ORDER BY id ASC;",
+		"limit":  2,
+		"offset": 0,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200 OK for SELECT, got %d: %v", resp.StatusCode, payload)
+	}
+	data = payload["data"].(map[string]any)
+	rows := data["rows"].([]any)
+	if len(rows) != 2 {
+		t.Fatalf("Expected 2 rows, got %d", len(rows))
+	}
+	if data["has_more"] != true {
+		t.Errorf("Expected has_more: true, got %v", data["has_more"])
+	}
+	if data["rows_affected"].(float64) != 2 {
+		t.Errorf("Expected rows_affected: 2, got %v", data["rows_affected"])
+	}
+
+	// 5. Execute Syntax Error: Expect 400 Bad Request QUERY_EXECUTION_ERROR
+	resp, payload, _ = doReq(t, http.MethodPost, ts.URL+"/api/v1/instances/"+instanceID+"/query", map[string]any{
+		"sql": "SELECT * FORM products;",
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("Expected 400 Bad Request for syntax error, got %d", resp.StatusCode)
+	}
+	errObj := payload["error"].(map[string]any)
+	if errObj["code"] != "QUERY_EXECUTION_ERROR" {
+		t.Errorf("Expected QUERY_EXECUTION_ERROR, got %v", errObj["code"])
+	}
+}
+
+func TestPoolEviction_OnCascadeDelete(t *testing.T) {
+	ts := setupTestServer(t)
+	defer ts.Close()
+
+	// 1. Create project
+	_, pPayload, _ := doReq(t, http.MethodPost, ts.URL+"/api/v1/projects", map[string]any{
+		"name": "Cascade Eviction Project",
+	})
+	projectID := pPayload["data"].(map[string]any)["id"].(string)
+
+	// 2. Create instance
+	_, iPayload, _ := doReq(t, http.MethodPost, ts.URL+"/api/v1/projects/"+projectID+"/instances", map[string]any{
+		"name":          "Cascade DB",
+		"driver_type":   "sqlite",
+		"database_name": ":memory:",
+	})
+	instanceID := iPayload["data"].(map[string]any)["id"].(string)
+
+	// 3. Test connection to instantiate connection pool in registry
+	resp, payload, _ := doReq(t, http.MethodPost, ts.URL+"/api/v1/instances/"+instanceID+"/test-connection", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200 OK, got %d: %v", resp.StatusCode, payload)
+	}
+
+	// 4. Delete Project (which cascades instance deletion and evicts pools)
+	resp, _, _ = doReq(t, http.MethodDelete, ts.URL+"/api/v1/projects/"+projectID, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200 OK on DeleteProject, got %d", resp.StatusCode)
+	}
+
+	// 5. Subsequent query on deleted instance should return 404 NOT_FOUND
+	resp, _, _ = doReq(t, http.MethodPost, ts.URL+"/api/v1/instances/"+instanceID+"/query", map[string]any{
+		"sql": "SELECT 1;",
+	})
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("Expected 404 Not Found for deleted instance, got %d", resp.StatusCode)
 	}
 }

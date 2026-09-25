@@ -8,6 +8,7 @@ import (
 
 	"tathya-avalokan/backend/internal/crypto"
 	"tathya-avalokan/backend/internal/models"
+	"tathya-avalokan/backend/internal/proxy"
 	"tathya-avalokan/backend/internal/repository"
 	"tathya-avalokan/backend/internal/response"
 
@@ -15,14 +16,16 @@ import (
 )
 
 type InstancesHandler struct {
-	pRepo *repository.ProjectRepository
-	iRepo *repository.InstanceRepository
+	pRepo       *repository.ProjectRepository
+	iRepo       *repository.InstanceRepository
+	proxyEngine *proxy.ProxyEngine
 }
 
-func NewInstancesHandler(pRepo *repository.ProjectRepository, iRepo *repository.InstanceRepository) *InstancesHandler {
+func NewInstancesHandler(pRepo *repository.ProjectRepository, iRepo *repository.InstanceRepository, proxyEngine *proxy.ProxyEngine) *InstancesHandler {
 	return &InstancesHandler{
-		pRepo: pRepo,
-		iRepo: iRepo,
+		pRepo:       pRepo,
+		iRepo:       iRepo,
+		proxyEngine: proxyEngine,
 	}
 }
 
@@ -187,6 +190,10 @@ func (h *InstancesHandler) UpdateInstance(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if h.proxyEngine != nil {
+		_ = h.proxyEngine.EvictPool(id)
+	}
+
 	response.SendJSON(w, http.StatusOK, updated, nil)
 }
 
@@ -206,6 +213,10 @@ func (h *InstancesHandler) DeleteInstance(w http.ResponseWriter, r *http.Request
 	if !deleted {
 		response.SendError(w, http.StatusNotFound, response.ErrCodeNotFound, fmt.Sprintf("Database instance with id '%s' not found", id), nil)
 		return
+	}
+
+	if h.proxyEngine != nil {
+		_ = h.proxyEngine.EvictPool(id)
 	}
 
 	response.SendJSON(w, http.StatusOK, map[string]any{

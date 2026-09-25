@@ -18,6 +18,7 @@ import (
 	"tathya-avalokan/backend/internal/database"
 	"tathya-avalokan/backend/internal/handlers"
 	"tathya-avalokan/backend/internal/middleware"
+	"tathya-avalokan/backend/internal/proxy"
 	"tathya-avalokan/backend/internal/repository"
 )
 
@@ -35,15 +36,23 @@ func main() {
 	defer db.Close()
 	log.Println("Internal metadata schema ready.")
 
+	// Instantiate proxy engine for target database connectivity
+	proxyEngine := proxy.NewProxyEngine()
+	defer func() {
+		if err := proxyEngine.CloseAll(); err != nil {
+			log.Printf("Error closing proxy connection pools: %v", err)
+		}
+	}()
+
 	// Instantiate repositories
 	projectRepo := repository.NewProjectRepository(db)
 	instanceRepo := repository.NewInstanceRepository(db)
 
 	// Instantiate HTTP handlers
 	healthHandler := handlers.NewHealthHandler()
-	projectsHandler := handlers.NewProjectsHandler(projectRepo)
-	instancesHandler := handlers.NewInstancesHandler(projectRepo, instanceRepo)
-	queryHandler := handlers.NewQueryHandler(instanceRepo)
+	projectsHandler := handlers.NewProjectsHandler(projectRepo, proxyEngine)
+	instancesHandler := handlers.NewInstancesHandler(projectRepo, instanceRepo, proxyEngine)
+	queryHandler := handlers.NewQueryHandler(instanceRepo, proxyEngine)
 
 	// Router setup
 	r := chi.NewRouter()

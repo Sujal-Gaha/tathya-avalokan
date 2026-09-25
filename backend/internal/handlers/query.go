@@ -2,13 +2,13 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
-	"tathya-avalokan/backend/internal/guard"
 	"tathya-avalokan/backend/internal/models"
+	"tathya-avalokan/backend/internal/proxy"
 	"tathya-avalokan/backend/internal/repository"
 	"tathya-avalokan/backend/internal/response"
 
@@ -16,11 +16,15 @@ import (
 )
 
 type QueryHandler struct {
-	iRepo *repository.InstanceRepository
+	iRepo       *repository.InstanceRepository
+	proxyEngine *proxy.ProxyEngine
 }
 
-func NewQueryHandler(iRepo *repository.InstanceRepository) *QueryHandler {
-	return &QueryHandler{iRepo: iRepo}
+func NewQueryHandler(iRepo *repository.InstanceRepository, proxyEngine *proxy.ProxyEngine) *QueryHandler {
+	return &QueryHandler{
+		iRepo:       iRepo,
+		proxyEngine: proxyEngine,
+	}
 }
 
 // TestConnection handles POST /api/v1/instances/{id}/test-connection
@@ -41,14 +45,24 @@ func (h *QueryHandler) TestConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	start := time.Now()
-	latency := float64(time.Since(start).Microseconds()) / 1000.0
+	if h.proxyEngine == nil {
+		response.SendError(w, http.StatusInternalServerError, response.ErrCodeInternal, "Database proxy engine is uninitialized", nil)
+		return
+	}
 
-	res := models.ConnectionTestResponse{
-		Connected:     true,
-		LatencyMs:     latency,
-		ServerVersion: fmt.Sprintf("%s Proxy Target", strings.Title(string(inst.DriverType))),
-		Message:       "Connection configuration verified successfully",
+	res, err := h.proxyEngine.TestConnection(r.Context(), inst)
+	if err != nil {
+		host := ""
+		if inst.Host != nil {
+			host = *inst.Host
+		}
+		port := 0
+		if inst.Port != nil {
+			port = *inst.Port
+		}
+		status, code, msg, details := proxy.ClassifyConnectionError(err, host, port, string(inst.DriverType))
+		response.SendError(w, status, code, msg, details)
+		return
 	}
 
 	response.SendJSON(w, http.StatusOK, res, nil)
@@ -83,34 +97,22 @@ func (h *QueryHandler) ExecuteQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if inst.IsReadOnly {
-		isMutating, kw := guard.IsMutating(req.SQL)
-		if isMutating {
-			response.SendError(
-				w,
-				http.StatusForbidden,
-				response.ErrCodeReadOnly,
-				fmt.Sprintf("Mutating queries are prohibited on read-only database instances (detected keyword: '%s')", kw),
-				nil,
-			)
-			return
-		}
+	if h.proxyEngine == nil {
+		response.SendError(w, http.StatusInternalServerError, response.ErrCodeInternal, "Database proxy engine is uninitialized", nil)
+		return
 	}
 
-	start := time.Now()
-	execTime := float64(time.Since(start).Microseconds()) / 1000.0
+	res, err := h.proxyEngine.ExecuteQuery(r.Context(), inst, req)
+	if err != nil {
+		var roErr *proxy.ReadOnlyViolationError
+		if errors.As(err, &roErr) {
+			response.SendError(w, http.StatusForbidden, response.ErrCodeReadOnly, roErr.Error(), nil)
+			return
+		}
 
-	res := models.QueryResponse{
-		Columns: []models.ColumnMeta{
-			{Name: "status", Type: "text"},
-			{Name: "info", Type: "text"},
-		},
-		Rows: []map[string]any{
-			{"status": "ready", "info": fmt.Sprintf("Query received for %s (%s)", inst.Name, inst.DriverType)},
-		},
-		RowsAffected:    1,
-		ExecutionTimeMs: execTime,
-		HasMore:         false,
+		status, code, msg, details := proxy.ClassifyExecutionError(err)
+		response.SendError(w, status, code, msg, details)
+		return
 	}
 
 	response.SendJSON(w, http.StatusOK, res, nil)

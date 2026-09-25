@@ -132,7 +132,7 @@ pnpm run dev
 
 - [x] **Phase 1: Project Scaffolding & Architecture Documentation** (Foundational setup, specifications, and structure)
 - [x] **Phase 2: Backend Metadata & Projects/Instances API in Go** (Chi router, AES-256-GCM encryption, modernc SQLite persistence)
-- [ ] **Phase 3: Database Proxy & Driver Engine** (Connection testing and query execution for PostgreSQL and MySQL)
+- [x] **Phase 3: Database Proxy & Driver Engine** (Connection testing, pool registry, and query execution for PostgreSQL, MySQL, and SQLite)
 - [ ] **Phase 4: Frontend Workspace & Monaco Editor** (Project sidebar, schema explorer, query execution workbench)
 - [ ] **Phase 5: Data Grid & Result Export** (Virtualized table viewer, pagination, CSV/JSON export)
 - [ ] **Phase 6: Schema Visualizer & Autocomplete** (Table columns, indexes, foreign key, SQL schema-aware autocompletion)

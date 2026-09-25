@@ -10,6 +10,7 @@ Go + Chi Backend-for-Frontend (BFF) and Database Proxy service.
 - `internal/guard`: Comment-stripping SQL keyword extractor and read-only guardrails
 - `internal/models`: Domain structs, requests, and unified response DTOs
 - `internal/repository`: Clean SQLite data access layer for projects and database instances
+- `internal/proxy`: Multi-engine database driver proxy, thread-safe connection pooling, pagination, and dynamic row scanning
 - `internal/handlers`: HTTP REST controllers implementing `/api/v1`
 - `internal/middleware`: CORS and request handling
 
